@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import math
 import argparse
 import numpy as np
 import os
@@ -10,8 +11,7 @@ import pandas as pd
 
 
 def generate_graph_seq2seq_io_data(
-        df, x_offsets, y_offsets, add_time_in_day=True, add_day_in_week=False, scaler=None
-):
+        df, x_offsets, y_offsets, add_time_in_day=True, add_day_in_week=False, scaler=None, masked_percent=0):
     """
     Generate samples from
     :param df:
@@ -24,7 +24,6 @@ def generate_graph_seq2seq_io_data(
     # x: (epoch_size, input_length, num_nodes, input_dim)
     # y: (epoch_size, output_length, num_nodes, output_dim)
     """
-
     num_samples, num_nodes = df.shape
     data = np.expand_dims(df.values, axis=-1)
     feature_list = [data]
@@ -41,8 +40,17 @@ def generate_graph_seq2seq_io_data(
     x, y = [], []
     min_t = abs(min(x_offsets))
     max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
-    for t in range(min_t, max_t):  # t is the index of the last observation.
-        x.append(data[t + x_offsets, ...])
+    seq_len = len(x_offsets)
+    total_seq_len = seq_len * num_nodes
+    for t in range(min_t, max_t):  # t is the index of the last observation
+        inputs = data[t + x_offsets, ...].reshape(-1, data.shape[-1])
+        masked_indices = np.random.choice(
+            total_seq_len, math.floor(total_seq_len * masked_percent / 100),
+            replace=False)
+        inputs[masked_indices] = float("-inf")
+        inputs = inputs.reshape(seq_len, num_nodes, -1)
+        x.append(inputs)
+        #x.append(data[t + x_offsets, ...])
         y.append(data[t + y_offsets, ...])
     x = np.stack(x, axis=0)
     y = np.stack(y, axis=0)
@@ -62,8 +70,9 @@ def generate_train_val_test(args):
         df,
         x_offsets=x_offsets,
         y_offsets=y_offsets,
-        add_time_in_day=True,
+        add_time_in_day=False,#True,
         add_day_in_week=args.dow,
+        masked_percent=args.masked_percent,
     )
 
     print("x shape: ", x.shape, ", y shape: ", y.shape)
@@ -98,6 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("--seq_length_x", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--seq_length_y", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--y_start", type=int, default=1, help="Y pred start", )
+    parser.add_argument("--masked_percent", type=int, default=0, help="masked data", )
     parser.add_argument("--dow", action='store_true',)
 
     args = parser.parse_args()
