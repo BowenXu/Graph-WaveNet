@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import argparse
@@ -5,10 +6,13 @@ import time
 import util
 import matplotlib.pyplot as plt
 from engine import trainer
+from tqdm import tqdm
+import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device',type=str,default='cuda:0',help='')
 parser.add_argument('--data',type=str,default='data/METR-LA',help='data path')
+parser.add_argument('--data_type',type=str,default='METR-LA',help='data type')
 parser.add_argument('--adjdata',type=str,default='data/sensor_graph/adj_mx.pkl',help='adj data path')
 parser.add_argument('--adjtype',type=str,default='doubletransition',help='adj type')
 parser.add_argument('--gcn_bool',action='store_true',help='whether to add graph convolution layer')
@@ -25,19 +29,36 @@ parser.add_argument('--dropout',type=float,default=0.3,help='dropout rate')
 parser.add_argument('--weight_decay',type=float,default=0.0001,help='weight decay rate')
 parser.add_argument('--epochs',type=int,default=100,help='')
 parser.add_argument('--print_every',type=int,default=50,help='')
-parser.add_argument('--seed',type=int,default=123,help='random seed')
-parser.add_argument('--save',type=str,default='./garage/metr',help='save path')
-parser.add_argument('--expid',type=int,default=1,help='experiment id')
+parser.add_argument('--seed',type=int,help='random seed')
+parser.add_argument('--save',type=str,default='./checkpoints/',help='save path')
+parser.add_argument("--project_name",
+                    type=str,
+                    default="GWNET",
+                    help="project name for wandb, default dcrnn_gp")
+parser.add_argument("--run_name",
+                    type=str,
+                    default="",
+                    help="run name for wandb, default empty str")
 
 args = parser.parse_args()
 
 
-
-
 def main():
     #set seed
-    #torch.manual_seed(args.seed)
-    #np.random.seed(args.seed)
+    args.seed = args.seed if args.seed else \
+        np.random.randint(0, np.iinfo("uint32").max, size=1)[-1]
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(args.seed)
+
+    # update run_name & save_dir
+    args.run_name += "_".join([
+        args.data_type, str(args.seq_length), str(args.seed)])
+    args.save += args.run_name + "/"
+    os.makedirs(args.save)
+    wandb.init(config=args, project=args.project_name, name=args.run_name)
+
     #load data
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata,args.adjtype)
@@ -66,7 +87,7 @@ def main():
     his_loss =[]
     val_time = []
     train_time = []
-    for i in range(1,args.epochs+1):
+    for i in tqdm(range(1,args.epochs+1)):
         #if i % 10 == 0:
             #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
             #for g in engine.optimizer.param_groups:
@@ -121,13 +142,19 @@ def main():
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)),flush=True)
-        torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss,2))+".pth")
+        torch.save(engine.model.state_dict(), args.save+"epoch_"+str(i)+"_"+str(round(mvalid_loss,2))+".pth")
+        wandb.log({"Train MAE" : mtrain_loss,
+                   "Train MAPE" : mtrain_mape,
+                   "Train RMSE" : mtrain_rmse,
+                   "Validation MAE" : mvalid_loss,
+                   "Validation MAPE": mvalid_mape,
+                   "Validation RMSE": mvalid_rmse}, step=i)
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
     #testing
     bestid = np.argmin(his_loss)
-    engine.model.load_state_dict(torch.load(args.save+"_epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid],2))+".pth"))
+    engine.model.load_state_dict(torch.load(args.save+"epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid],2))+".pth"))
 
 
     outputs = []
@@ -139,7 +166,7 @@ def main():
         testx = testx.transpose(1,3)
         with torch.no_grad():
             preds = engine.model(testx).transpose(1,3)
-        outputs.append(preds.squeeze())
+        outputs.append(preds.squeeze(1))
 
     yhat = torch.cat(outputs,dim=0)
     yhat = yhat[:realy.size(0),...]
@@ -162,9 +189,16 @@ def main():
         amape.append(metrics[1])
         armse.append(metrics[2])
 
+        wandb.log({"Test MAE" : metrics[0],
+                   "Test MAPE" : metrics[1],
+                   "Test RMSE" : metrics[2]}, step=i + args.epochs + 1)
+
     log = 'On average over horizons, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'
     print(log.format(np.mean(amae),np.mean(amape),np.mean(armse)))
-    torch.save(engine.model.state_dict(), args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid],2))+".pth")
+    wandb.log({"Avg Test MAE" : np.mean(amae),
+               "Avg Test MAPE" : np.mean(amape),
+               "Avg Test RMSE" : np.mean(armse)})
+    torch.save(engine.model.state_dict(), args.save+"best_"+str(round(his_loss[bestid],2))+".pth")
 
 
 
