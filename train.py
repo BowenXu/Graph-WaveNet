@@ -31,6 +31,7 @@ parser.add_argument('--epochs',type=int,default=100,help='')
 parser.add_argument('--print_every',type=int,default=50,help='')
 parser.add_argument('--seed',type=int,help='random seed')
 parser.add_argument('--save',type=str,default='./checkpoints/',help='save path')
+parser.add_argument('--impute_type',type=str,default='',help='data imputation type')
 parser.add_argument("--project_name",
                     type=str,
                     default="GWNET",
@@ -80,7 +81,7 @@ def main():
 
     engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit)
+                         adjinit, args.impute_type)
 
 
     print("start training...",flush=True)
