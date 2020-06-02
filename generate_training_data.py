@@ -37,24 +37,25 @@ def generate_graph_seq2seq_io_data(
         feature_list.append(dow_tiled)
 
     data = np.concatenate(feature_list, axis=-1)
-    x, y = [], []
+    masked_data = np.copy(data.reshape(-1))
+    data_size = len(masked_data)
+    masked_indices = np.random.choice(
+        data_size, data_size * masked_percent // 100, replace=False)
+    masked_data[masked_indices] = float("-inf")
+    masked_data = masked_data.reshape(data.shape)
+
+    masked_x, masked_y, y = [], [], []
     min_t = abs(min(x_offsets))
     max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
-    seq_len = len(x_offsets)
-    total_seq_len = seq_len * num_nodes
     for t in range(min_t, max_t):  # t is the index of the last observation
-        inputs = data[t + x_offsets, ...].reshape(-1, data.shape[-1])
-        masked_indices = np.random.choice(
-            total_seq_len, math.floor(total_seq_len * masked_percent / 100),
-            replace=False)
-        inputs[masked_indices] = float("-inf")
-        inputs = inputs.reshape(seq_len, num_nodes, -1)
-        x.append(inputs)
-        #x.append(data[t + x_offsets, ...])
+        masked_x.append(masked_data[t + x_offsets, ...])
+        masked_y.append(masked_data[t + y_offsets, ...])
         y.append(data[t + y_offsets, ...])
-    x = np.stack(x, axis=0)
+    masked_x = np.stack(masked_x, axis=0)
+    masked_y = np.stack(masked_y, axis=0)
     y = np.stack(y, axis=0)
-    return x, y
+
+    return masked_x, masked_y, y
 
 
 def generate_train_val_test(args):
@@ -66,7 +67,7 @@ def generate_train_val_test(args):
     y_offsets = np.sort(np.arange(args.y_start, (seq_length_y + 1), 1))
     # x: (num_samples, input_length, num_nodes, input_dim)
     # y: (num_samples, output_length, num_nodes, output_dim)
-    x, y = generate_graph_seq2seq_io_data(
+    masked_x, masked_y, y = generate_graph_seq2seq_io_data(
         df,
         x_offsets=x_offsets,
         y_offsets=y_offsets,
@@ -75,18 +76,20 @@ def generate_train_val_test(args):
         masked_percent=args.masked_percent,
     )
 
-    print("x shape: ", x.shape, ", y shape: ", y.shape)
+    print("x shape: ", masked_x.shape, ", y shape: ", masked_y.shape)
     # Write the data into npz file.
-    num_samples = x.shape[0]
+    num_samples = masked_x.shape[0]
     num_test = round(num_samples * 0.2)
     num_train = round(num_samples * 0.7)
     num_val = num_samples - num_test - num_train
-    x_train, y_train = x[:num_train], y[:num_train]
+    x_train, y_train = masked_x[:num_train], masked_y[:num_train]
     x_val, y_val = (
-        x[num_train: num_train + num_val],
-        y[num_train: num_train + num_val],
+        masked_x[num_train: num_train + num_val],
+        masked_y[num_train: num_train + num_val],
     )
-    x_test, y_test = x[-num_test:], y[-num_test:]
+    x_test, y_test = masked_x[-num_test:], masked_y[-num_test:]
+    y_test_inf = np.where(np.isinf(y_test))
+    y_test[y_test_inf] = y[-num_test:][y_test_inf]
 
     for cat in ["train", "val", "test"]:
         _x, _y = locals()["x_" + cat], locals()["y_" + cat]
