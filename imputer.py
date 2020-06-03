@@ -6,7 +6,8 @@ import torch.nn.functional as F
 class Imputer(nn.Module):
     """Impute missing data based on type."""
     def __init__(self, impute_type, n_nodes, n_dim, seq_len=12,
-                 gcn_dropout=0.0, gcn_support_len=1, gcn_order=1):
+                 gcn_dropout=0.0, gcn_support_len=1, gcn_order=1,
+                 device="cpu"):
         super(Imputer, self).__init__()
         self.type = impute_type
         self.seq_len = seq_len
@@ -63,7 +64,9 @@ class Imputer(nn.Module):
                         imputed_x[batch, dim, node, seq] = mean
                         lookup[batch, node] = mean
             elif self.type in ["ADJ", "GCN"]:
-                supports = supports[0] if self.type == "ADJ" else supports
+                if self.type == "ADJ":
+                    supports = supports[0]
+
                 imputed_x[indices] = 0.0
                 gcn_x = self.gcn(imputed_x, supports)
                 imputed_x[indices] = gcn_x[indices]
@@ -80,7 +83,7 @@ class nconv(nn.Module):
 
 
     def forward(self, x, A):
-        x = torch.einsum('ncvl,vw->ncwl', (x, A))
+        x = torch.einsum('ncvl,vw->ncwl', x, A)
 
         return x.contiguous()
 
@@ -97,13 +100,14 @@ class gcn(nn.Module):
 
     def forward(self, x, support):
         out = [x]
+        x0 = x
         for a in support:
             x1 = self.nconv(x, a)
             out.append(x1)
             for k in range(2, self.order + 1):
-                x2 = self.nconv(x1, a)
+                x2 = 2 * self.nconv(x1, a) - x0
                 out.append(x2)
-                x1 = x2
+                x1, x0 = x2, x1
 
         h = torch.cat(out, dim=1)
         h = self.mlp(h.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)

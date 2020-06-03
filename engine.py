@@ -5,11 +5,13 @@ import util
 class trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, nhid , dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, impute_type):
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit, in_dim=in_dim, out_dim=seq_length, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
-        self.imputer = Imputer(impute_type, num_nodes, in_dim,
+        self.imputer = Imputer(impute_type, num_nodes, in_dim, device=device,
             gcn_dropout=dropout, gcn_support_len=self.model.supports_len, gcn_order=2)
         self.model.to(device)
         self.imputer.to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lrate, weight_decay=wdecay)
+        self.optimizer = optim.Adam(
+            list(self.model.parameters()) + list(self.imputer.parameters()),
+            lr=lrate, weight_decay=wdecay)
         self.loss = util.masked_mae
         self.scaler = scaler
         self.clip = 5
@@ -32,7 +34,9 @@ class trainer():
         loss = self.loss(predict_, real_, 0.0)
         loss.backward()
         if self.clip is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+            torch.nn.utils.clip_grad_norm_(
+                list(self.model.parameters()) +
+                list(self.imputer.parameters()), self.clip)
         self.optimizer.step()
         mape = util.masked_mape(predict_, real_, 0.0).item()
         rmse = util.masked_rmse(predict_, real_, 0.0).item()
