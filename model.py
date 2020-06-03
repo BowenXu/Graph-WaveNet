@@ -135,6 +135,14 @@ class gwnet(nn.Module):
         self.receptive_field = receptive_field
 
 
+    def get_supports(self):
+        supports = self.supports
+        if self.gcn_bool and self.addaptadj and self.supports is not None:
+            adp = F.softmax(torch.mm(self.nodevec1, self.nodevec2), dim=1)
+            supports = self.supports + [adp.detach()]
+
+        return supports
+
 
     def forward(self, input):
         in_len = input.size(3)
@@ -189,7 +197,7 @@ class gwnet(nn.Module):
                 if self.addaptadj:
                     x = self.gconv[i](x, new_supports)
                 else:
-                    x = self.gconv[i](x,self.supports)
+                    x = self.gconv[i](x, self.supports)
             else:
                 x = self.residual_convs[i](x)
 

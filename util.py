@@ -209,5 +209,3 @@ def metric(pred, real):
     mape = masked_mape(pred,real,0.0).item()
     rmse = masked_rmse(pred,real,0.0).item()
     return mae,mape,rmse
-
-

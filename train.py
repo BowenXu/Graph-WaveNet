@@ -166,6 +166,7 @@ def main():
         testx = torch.Tensor(x).to(device)
         testx = testx.transpose(1,3)
         with torch.no_grad():
+            testx = engine.imputer(testx, engine.model.get_supports())
             preds = engine.model(testx).transpose(1,3)
         outputs.append(preds.squeeze(1))
 
