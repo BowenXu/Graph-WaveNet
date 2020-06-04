@@ -13,6 +13,7 @@ class Imputer(nn.Module):
         self.seq_len = seq_len
         self.n_nodes = n_nodes
         self.n_dim = n_dim
+        self.device = device
 
         if self.type == "ADJ":
             self.gcn = nconv()
@@ -23,8 +24,8 @@ class Imputer(nn.Module):
 
     def forward(self, x, supports=None):
         imputed_x = x
-        if self.type != "":
-            indices = (x == float("-inf")).nonzero(as_tuple=True)
+        indices = (x == float("-inf")).nonzero(as_tuple=True)
+        if self.type != "" and len(indices[-1]) != 0:
             if self.type == "ZERO":
                 imputed_x[indices] = 0.0
             elif self.type == "LAST":
@@ -65,7 +66,9 @@ class Imputer(nn.Module):
                         lookup[batch, node] = mean
             elif self.type in ["ADJ", "GCN"]:
                 if self.type == "ADJ":
-                    supports = supports[0]
+                    supports = supports[0].to(x.device)
+                else:
+                    imputed_x = x.clone().to(self.device)
 
                 imputed_x[indices] = 0.0
                 gcn_x = self.gcn(imputed_x, supports)

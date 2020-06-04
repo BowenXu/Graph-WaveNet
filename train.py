@@ -89,18 +89,18 @@ def main():
     val_time = []
     train_time = []
     for i in tqdm(range(1,args.epochs+1)):
-        #if i % 10 == 0:
-            #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
-            #for g in engine.optimizer.param_groups:
-                #g['lr'] = lr
         train_loss = []
         train_mape = []
         train_rmse = []
         t1 = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
-            trainx = torch.Tensor(x).to(device)
-            trainx= trainx.transpose(1, 3)
+            if i == 1 or engine.imputer.type =="GCN":
+                trainx = engine.imputer(
+                    x.transpose(1, 3), engine.model.get_supports())
+            else:
+                trainx = x.transpose(1, 3)
+            trainx = trainx.to(device)
             trainy = torch.Tensor(y).to(device)
             trainy = trainy.transpose(1, 3)
             metrics = engine.train(trainx, trainy[:,0,:,:])
@@ -120,8 +120,12 @@ def main():
 
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
-            testx = torch.Tensor(x).to(device)
-            testx = testx.transpose(1, 3)
+            if i == 1 or engine.imputer.type =="GCN":
+                testx = engine.imputer(
+                    x.transpose(1, 3), engine.model.get_supports())
+            else:
+                testx = x.transpose(1, 3)
+            testx = testx.to(device)
             testy = torch.Tensor(y).to(device)
             testy = testy.transpose(1, 3)
             metrics = engine.eval(testx, testy[:,0,:,:])
@@ -163,10 +167,9 @@ def main():
     realy = realy.transpose(1,3)[:,0,:,:]
 
     for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
-        testx = torch.Tensor(x).to(device)
-        testx = testx.transpose(1,3)
         with torch.no_grad():
-            testx = engine.imputer(testx, engine.model.get_supports())
+            testx = engine.imputer(x.transpose(1, 3), engine.model.get_supports())
+            testx = testx.to(device)
             preds = engine.model(testx).transpose(1,3)
         outputs.append(preds.squeeze(1))
 

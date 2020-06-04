@@ -20,8 +20,7 @@ class trainer():
         self.model.train()
         self.imputer.train()
         self.optimizer.zero_grad()
-        input_ = self.imputer(input, self.model.get_supports())
-        input_ = nn.functional.pad(input_,(1,0,0,0))
+        input_ = nn.functional.pad(input,(1,0,0,0))
         output = self.model(input_)
         output = output.transpose(1,3)
         #output = [batch_size,12,num_nodes,1]
@@ -45,8 +44,7 @@ class trainer():
     def eval(self, input, real_val):
         self.model.eval()
         self.imputer.eval()
-        input_ = self.imputer(input, self.model.get_supports())
-        input_ = nn.functional.pad(input_,(1,0,0,0))
+        input_ = nn.functional.pad(input,(1,0,0,0))
         output = self.model(input_)
         output = output.transpose(1,3)
         #output = [batch_size,12,num_nodes,1]

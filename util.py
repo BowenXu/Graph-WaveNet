@@ -24,8 +24,8 @@ class DataLoader(object):
             ys = np.concatenate([ys, y_padding], axis=0)
         self.size = len(xs)
         self.num_batch = int(self.size // self.batch_size)
-        self.xs = xs
-        self.ys = ys
+        self.xs = torch.tensor(xs).float()
+        self.ys = torch.tensor(ys).float()
 
     def shuffle(self):
         permutation = np.random.permutation(self.size)
