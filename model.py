@@ -33,13 +33,14 @@ class gcn(nn.Module):
 
     def forward(self,x,support):
         out = [x]
+        x0 = x
         for a in support:
             x1 = self.nconv(x,a)
             out.append(x1)
             for k in range(2, self.order + 1):
-                x2 = self.nconv(x1,a)
+                x2 = 2 * self.nconv(x1, a) - x0
                 out.append(x2)
-                x1 = x2
+                x1, x0 = x2, x1
 
         h = torch.cat(out,dim=1)
         h = self.mlp(h.permute(0,2,3,1)).permute(0,3,1,2)
