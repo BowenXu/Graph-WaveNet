@@ -7,7 +7,7 @@ class Imputer(nn.Module):
     """Impute missing data based on type."""
     def __init__(self, impute_type, n_nodes, n_dim, seq_len=12,
                  gcn_dropout=0.0, gcn_support_len=1, gcn_order=1,
-                 device="cpu"):
+                 device="cpu", adj=None):
         super(Imputer, self).__init__()
         self.type = impute_type
         self.seq_len = seq_len
@@ -20,6 +20,22 @@ class Imputer(nn.Module):
         if self.type == "GCN":
             self.gcn = gcn(c_in=n_dim, c_out=n_dim, dropout=gcn_dropout,
                            support_len=gcn_support_len, order=gcn_order)
+        if self.type == "MVN":
+            self.create_normalized_laplacian(adj)
+            self.mvn_mean = 0.0
+
+
+    def create_normalized_laplacian(self, adj):
+        """Normalized graph Laplacian"""
+        adjacency_matrix = adj.clone().fill_diagonal_(0.0)
+        degree_matrix = torch.diag(
+            1.0 / adjacency_matrix.sum(-1).sqrt())
+        degree_matrix[degree_matrix == float("inf")] = 0.0
+        matrix_matrix_product = degree_matrix.mm(
+            adjacency_matrix).mm(degree_matrix)
+        self.graph_laplacian = \
+            torch.eye(self.n_nodes) - matrix_matrix_product
+        self.graph_laplacian = self.graph_laplacian.to(self.device)
 
 
     def forward(self, x, supports=None):
@@ -73,6 +89,19 @@ class Imputer(nn.Module):
                 imputed_x[indices] = 0.0
                 gcn_x = self.gcn(imputed_x, supports)
                 imputed_x[indices] = gcn_x[indices]
+            elif self.type == "MVN":
+                #gl_inv = torch.inverse(self.graph_laplacian)
+                lookup = set()
+                for batch, seq in zip(indices[0], indices[1]):
+                    batch = batch.item()
+                    seq = seq.item()
+                    if (batch, seq) not in lookup:
+                        #TODO
+                        #get sub-part indices, create sub_gl, sub_gl_inv
+                        #use cholesky, cholesky_solve
+                        #use mean if all nodes are missing
+                        lookup.add(batch, seq)
+                pass
             else:
                 return NotImplementedError()
 

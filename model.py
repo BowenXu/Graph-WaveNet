@@ -136,12 +136,14 @@ class gwnet(nn.Module):
 
 
     def get_supports(self):
-        supports = [F.normalize(support.clone().fill_diagonal_(0.0), p=1, dim=-1)
-                    for support in self.supports]
+        #supports = [F.normalize(support.clone().fill_diagonal_(0.0), p=1, dim=-1)
+        #            for support in self.supports]
+        supports = self.supports
         if self.gcn_bool and self.addaptadj and self.supports is not None:
             adp = F.softmax(torch.mm(self.nodevec1, self.nodevec2), dim=-1)
-            adp = F.normalize(adp.detach().fill_diagonal_(0.0), p=1, dim=-1)
-            supports += [adp]
+            #adp = F.normalize(adp.detach().fill_diagonal_(0.0), p=1, dim=-1)
+            #supports += [adp]
+            supports = self.supports + [adp.detach()]
 
         return supports
 
