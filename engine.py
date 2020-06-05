@@ -6,7 +6,7 @@ class trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, nhid , dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, impute_type):
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit, in_dim=in_dim, out_dim=seq_length, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
         self.imputer = Imputer(impute_type, num_nodes, in_dim, device=device,
-            gcn_dropout=dropout, gcn_support_len=self.model.supports_len, gcn_order=2)
+            gcn_dropout=0.0, gcn_support_len=self.model.supports_len, gcn_order=2)
         self.model.to(device)
         self.imputer.to(device)
         self.optimizer = optim.Adam(
