@@ -93,7 +93,9 @@ def main():
         train_mape = []
         train_rmse = []
         t1 = time.time()
-        dataloader['train_loader'].shuffle()
+        if i > 1:
+            # Skip shuffling for 1st epoch for data imputation
+            dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
             if i == 1 or engine.imputer.type =="GCN":
                 trainx = engine.imputer(
