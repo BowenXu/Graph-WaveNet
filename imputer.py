@@ -1,6 +1,8 @@
+import itertools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
 class Imputer(nn.Module):
@@ -90,18 +92,55 @@ class Imputer(nn.Module):
                 gcn_x = self.gcn(imputed_x, supports)
                 imputed_x[indices] = gcn_x[indices]
             elif self.type == "MVN":
-                #gl_inv = torch.inverse(self.graph_laplacian)
                 lookup = set()
-                for batch, seq in zip(indices[0], indices[1]):
-                    batch = batch.item()
-                    seq = seq.item()
-                    if (batch, seq) not in lookup:
-                        #TODO
-                        #get sub-part indices, create sub_gl, sub_gl_inv
-                        #use cholesky, cholesky_solve
-                        #use mean if all nodes are missing
-                        lookup.add(batch, seq)
-                pass
+                for batch, dim, node, seq in indices:
+                    batch_ = batch.item()
+                    seq_ = seq.item()
+                    if (batch_, seq_) not in lookup:
+                        # Find missing nodes at each time slice
+                        unobserved_nodes = (
+                         x[batch_, :, :, seq_][x[batch_, :, :, seq_] ==
+                          float("-inf")]).nonzero(as_tuple=True)
+                        n_missing_nodes = len(unobserved_nodes[0])
+                        n_obs_nodes = self.n_nodes - n_missing_nodes
+                        unobs_indices = (
+                            batch.repeat(n_missing_nodes),
+                            dim.repeat(n_missing_nodes),
+                            unobserved_nodes[0],
+                            seq.repeat(n_missing_nodes))
+                        if n_missing_nodes == self.n_nodes:
+                            # Use default mean if all nodes are missing
+                            imputed_x[unobs_indices] = self.mvn_mean
+                        else:
+                            observed_nodes = torch.from_numpy(
+                                np.setdiff1d(np.arange(self.n_nodes),
+                                             unobserved_nodes[0].numpy()))
+                            obs_indices = (
+                                batch.repeat(n_obs_nodes),
+                                dim.repeat(n_obs_nodes),
+                                observed_nodes,
+                                seq.repeat(n_obs_nodes))
+                            x_obs = x[obs_indices] - self.mvn_mean
+                            x_obs = x_obs.contiguous().reshape(-1, 1)
+                            obs_row, obs_col = zip(*itertools.product(
+                                observed_nodes.tolist(), observed_nodes.tolist()))
+                            gl_obs = self.graph_laplacian[
+                                (torch.tensor(obs_row), torch.tensor(obs_col))]
+                            gl_obs = gl_obs.contiguous().reshape(
+                                n_obs_nodes, n_obs_nodes)
+                            chol_gl_obs = torch.cholesky(gl_obs)
+                            lhs = torch.cholesky_solve(x_obs, chol_gl_obs)
+
+                            unobs_row, unobs_col = zip(*itertools.product(
+                                unobserved_nodes[0].tolist(), observed_nodes.tolist()))
+                            gl_unobs = self.graph_laplacian[
+                                (torch.tensor(unobs_row), torch.tensor(unobs_col))]
+                            gl_unobs = gl_unobs.contiguous().reshape(
+                                n_missing_nodes, n_obs_nodes)
+                            x_imputed = self.mvn_mean + torch.mm(gl_unobs, lhs)
+                            imputed_x[unobs_indices] = x_imputed
+
+                        lookup.add((batch_, seq_))
             else:
                 return NotImplementedError()
 
