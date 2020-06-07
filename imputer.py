@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from scipy.sparse import csgraph
 
 
 class Imputer(nn.Module):
@@ -93,14 +94,14 @@ class Imputer(nn.Module):
                 imputed_x[indices] = gcn_x[indices]
             elif self.type == "MVN":
                 lookup = set()
-                for batch, dim, node, seq in indices:
+                for batch, dim, node, seq in zip(*indices):
                     batch_ = batch.item()
                     seq_ = seq.item()
+                    dim_ = dim.item()
                     if (batch_, seq_) not in lookup:
                         # Find missing nodes at each time slice
-                        unobserved_nodes = (
-                         x[batch_, :, :, seq_][x[batch_, :, :, seq_] ==
-                          float("-inf")]).nonzero(as_tuple=True)
+                        unobserved_nodes = (x[batch_, dim_, :, seq_] ==
+                          float("-inf")).nonzero(as_tuple=True)
                         n_missing_nodes = len(unobserved_nodes[0])
                         n_obs_nodes = self.n_nodes - n_missing_nodes
                         unobs_indices = (
@@ -385,4 +386,62 @@ if __name__ == "__main__":
     row_missing_ground_truth = row_missing_ground_truth.scatter(
         -1, torch.tensor([[[[2], ]]]), 5.4)
     imputed_data = one_hop_impute(row_missing, [adj.T])
+    assert torch.allclose(imputed_data, row_missing_ground_truth)
+
+    #
+    # IMPUTATION WITH MVN, DEFAULT TO 0.0
+    #
+    adj = torch.tensor([[0.1, 0.9],
+                        [0.6, 0.4]]).double()
+
+    # gl = [[1.0, -1.2247],
+    #       [-0.8165, 1.0]]
+    gl = torch.tensor(csgraph.laplacian(adj.numpy(), normed=True))
+    mvn_impute = Imputer("MVN", N_NODES, DIM, SEQ_LENGTH, adj=adj)
+
+    # Test normalized graph laplacian
+    assert torch.allclose(gl, mvn_impute.graph_laplacian, atol=1e-8)
+
+    # [[[-inf, 2, 3]
+    #   [4, 5, -inf]]]
+    left_missing = data.scatter(
+        -1, torch.tensor([[[[0], [2]]]]), float("-inf"))
+
+    # [[[-inf, -inf, 3]
+    #   [4, -inf, -inf]]]
+    block_missing = data.scatter(
+        -1, torch.tensor([[[[0, 1], [1, 2]]]]), float("-inf"))
+
+    # [[[-inf, -inf, -inf]
+    #   [4, 5, 6]]]
+    row_missing = data.scatter(
+        -1, torch.tensor([[[[0, 1, 2], ]]]), float("-inf"))
+
+    # [[[-inf, 2, 3]     --->    [[[-4.8990, 2, 3]
+    #   [4, 5, -inf]]]             [4, 5, -2.4495]]]
+    left_missing_ground_truth = data.scatter(
+        -1, torch.tensor([[[[0], ]]]), -4.8990)
+    left_missing_ground_truth[0, 0, 1, 2] = -2.4495
+    imputed_data = mvn_impute(left_missing)
+    assert torch.allclose(imputed_data, left_missing_ground_truth, atol=1e-4)
+
+    # [[[-inf, -inf, 3]     --->    [[[-4.8990, 0, 3]
+    #   [4, -inf, -inf]]]             [4, 0, -2.4495]]]
+    block_missing_ground_truth = data.scatter(
+        -1, torch.tensor([[[[0], ]]]), -4.8990)
+    block_missing_ground_truth[0, 0, 1, 2] = -2.4495
+    block_missing_ground_truth = block_missing_ground_truth.scatter(
+        -1, torch.tensor([[[[1], [1]]]]), 0.0)
+    imputed_data = mvn_impute(block_missing)
+    assert torch.allclose(imputed_data, block_missing_ground_truth, atol=1e-4)
+
+    # [[[-inf, -inf, -inf]     --->    [[[-4.8990, -6.1237, -7.3485]
+    #   [4, 5, 6]]]                      [4, 5, 6]]]
+    row_missing_ground_truth = data.scatter(
+        -1, torch.tensor([[[[0], ]]]), -4.8990)
+    row_missing_ground_truth = row_missing_ground_truth.scatter(
+        -1, torch.tensor([[[[1], ]]]), -6.1237)
+    row_missing_ground_truth = row_missing_ground_truth.scatter(
+        -1, torch.tensor([[[[2], ]]]), -7.3485)
+    imputed_data = mvn_impute(row_missing)
     assert torch.allclose(imputed_data, row_missing_ground_truth)
