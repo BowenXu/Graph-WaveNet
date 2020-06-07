@@ -10,7 +10,7 @@ class Imputer(nn.Module):
     """Impute missing data based on type."""
     def __init__(self, impute_type, n_nodes, n_dim, seq_len=12,
                  gcn_dropout=0.0, gcn_support_len=1, gcn_order=1,
-                 device="cpu", adj=None):
+                 device="cpu", adj=None, jitter=1e-6):
         super(Imputer, self).__init__()
         self.type = impute_type
         self.seq_len = seq_len
@@ -24,7 +24,9 @@ class Imputer(nn.Module):
             self.gcn = gcn(c_in=n_dim, c_out=n_dim, dropout=gcn_dropout,
                            support_len=gcn_support_len, order=gcn_order)
         if self.type == "MVN":
-            self.create_normalized_laplacian(adj)
+            self.device = "cpu"
+            self.jitter = jitter
+            self.create_normalized_laplacian(adj.to(self.device))
             self.mvn_mean = 0.0
 
 
@@ -36,8 +38,8 @@ class Imputer(nn.Module):
         degree_matrix[degree_matrix == float("inf")] = 0.0
         matrix_matrix_product = degree_matrix.mm(
             adjacency_matrix).mm(degree_matrix)
-        self.graph_laplacian = \
-            torch.eye(self.n_nodes) - matrix_matrix_product
+        self.graph_laplacian = torch.eye(self.n_nodes, device=self.device) - \
+            matrix_matrix_product
         self.graph_laplacian = self.graph_laplacian.to(self.device)
 
 
@@ -129,8 +131,13 @@ class Imputer(nn.Module):
                                 (torch.tensor(obs_row), torch.tensor(obs_col))]
                             gl_obs = gl_obs.contiguous().reshape(
                                 n_obs_nodes, n_obs_nodes)
-                            chol_gl_obs = torch.cholesky(gl_obs)
-                            lhs = torch.cholesky_solve(x_obs, chol_gl_obs)
+                            try:
+                                gl_obs.diagonal().add_(self.jitter)
+                                chol_gl_obs = torch.cholesky(gl_obs)
+                                lhs = torch.cholesky_solve(x_obs, chol_gl_obs)
+                            except:
+                                gl_obs_inv = torch.inverse(gl_obs)
+                                lhs = gl_obs_inv.mm(x_obs)
 
                             unobs_row, unobs_col = zip(*itertools.product(
                                 unobserved_nodes[0].tolist(), observed_nodes.tolist()))
@@ -139,7 +146,7 @@ class Imputer(nn.Module):
                             gl_unobs = gl_unobs.contiguous().reshape(
                                 n_missing_nodes, n_obs_nodes)
                             x_imputed = self.mvn_mean + torch.mm(gl_unobs, lhs)
-                            imputed_x[unobs_indices] = x_imputed
+                            imputed_x[unobs_indices] = x_imputed.squeeze()
 
                         lookup.add((batch_, seq_))
             else:
